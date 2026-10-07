@@ -1,0 +1,48 @@
+# Blend/aliquot genealogy audit service.
+#
+#   docker compose up --build api                 # start the API (host port $HOST_PORT, default 8080)
+#   docker compose up --build --exit-code-from verify --abort-on-container-exit verify
+#                                                 # one-shot verification: unit tests + smoke, exit code reports result
+#   docker compose down                           # clean up
+services:
+  api:
+    build: .
+    image: blend-audit:local
+    environment:
+      PORT: "8080"
+    ports:
+      # Host-side port is configurable: HOST_PORT=9090 docker compose up api
+      - "${HOST_PORT:-8080}:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('PORT','8080')+'/health',timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 3s
+    restart: unless-stopped
+
+  # One-shot verification service: runs the unit test suite, then smoke-tests
+  # the live API (conservation, out-of-order steps, illegal genealogies).
+  # It exits 0 on success and non-zero on any failure; use
+  # `docker compose up --exit-code-from verify` to propagate the result.
+  verify:
+    build: .
+    image: blend-audit:local
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_BASE_URL: "http://api:8080"
+    command:
+      [
+        "sh",
+        "-c",
+        "python -m unittest discover -s tests -v && python -m app.smoke",
+      ]
+    restart: "no"
