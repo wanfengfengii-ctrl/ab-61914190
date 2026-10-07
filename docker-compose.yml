@@ -1,0 +1,32 @@
+name: blend-audit
+
+services:
+  api:
+    build: .
+    image: blend-audit:latest
+    ports:
+      # host port is configurable: API_PORT=9090 docker compose up --build
+      - "${API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:%s/health'%os.environ.get('PORT','8080'),timeout=2).status==200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  # One-shot verification: byte-compile check, unit tests, then conservation /
+  # shuffled-order / illegal-lineage smoke tests against the healthy API.
+  # The container exit code reports the result:
+  #   docker compose --profile verify up --build --exit-code-from verify
+  verify:
+    image: blend-audit:latest
+    build: .
+    profiles: ["verify"]
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_URL: "http://api:8080"
+    command: ["python", "-m", "verify.run"]
+    restart: "no"
